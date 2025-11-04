@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'TrulyYou - AWS Resources Setup (S3, IAM User with Amplify, Rekognition, and Cognito permissions)'
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name for the S3 bucket (must be globally unique)
+    Default: truly-you-bucket
+    AllowedPattern: '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
+    ConstraintDescription: Bucket name must be lowercase, 3-63 characters, and contain only letters, numbers, and hyphens
+
+Resources:
+  # S3 Bucket for storing user data, liveness images, etc.
+  TrulyYouBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3000
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Application
+          Value: TrulyYou
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # IAM User for TrulyYou application
+  TrulyYouIAMUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'truly-you-user-${AWS::StackName}'
+      Tags:
+        - Key: Application
+          Value: TrulyYou
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Access Key for the IAM User
+  TrulyYouAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref TrulyYouIAMUser
+
+  # IAM Policy for S3 full access to the bucket
+  TrulyYouS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TrulyYouS3Access
+      Users:
+        - !Ref TrulyYouIAMUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: S3FullAccess
+            Effect: Allow
+            Action:
+              - s3:*
+            Resource:
+              - !GetAtt TrulyYouBucket.Arn
+              - !Sub '${TrulyYouBucket.Arn}/*'
+
+  # IAM Policy for Rekognition (facial recognition, liveness detection)
+  TrulyYouRekognitionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TrulyYouRekognitionAccess
+      Users:
+        - !Ref TrulyYouIAMUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: RekognitionFullAccess
+            Effect: Allow
+            Action:
+              - rekognition:*
+            Resource: '*'
+          - Sid: RekognitionServiceRole
+            Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:PassRole
+            Resource: '*'
+            Condition:
+              StringEquals:
+                iam:PassedToService: rekognition.amazonaws.com
+
+  # IAM Policy for Amplify (if needed for hosting/CI/CD)
+  TrulyYouAmplifyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TrulyYouAmplifyAccess
+      Users:
+        - !Ref TrulyYouIAMUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AmplifyFullAccess
+            Effect: Allow
+            Action:
+              - amplify:*
+            Resource: '*'
+
+  # IAM Policy for Cognito (user authentication/management)
+  TrulyYouCognitoPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TrulyYouCognitoAccess
+      Users:
+        - !Ref TrulyYouIAMUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CognitoFullAccess
+            Effect: Allow
+            Action:
+              - cognito-identity:*
+              - cognito-idp:*
+              - cognito-sync:*
+            Resource: '*'
+
+  # IAM Policy for CloudFront (CDN for faster content delivery)
+  TrulyYouCloudFrontPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TrulyYouCloudFrontAccess
+      Users:
+        - !Ref TrulyYouIAMUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudFrontFullAccess
+            Effect: Allow
+            Action:
+              - cloudfront:*
+            Resource: '*'
+
+  # IAM Policy for Lambda (if needed for serverless functions)
+  TrulyYouLambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TrulyYouLambdaAccess
+      Users:
+        - !Ref TrulyYouIAMUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: LambdaFullAccess
+            Effect: Allow
+            Action:
+              - lambda:*
+            Resource: '*'
+          - Sid: LambdaLogging
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: 'arn:aws:logs:*:*:*'
+
+Outputs:
+  BucketName:
+    Description: Name of the S3 bucket
+    Value: !Ref TrulyYouBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+
+  BucketArn:
+    Description: ARN of the S3 bucket
+    Value: !GetAtt TrulyYouBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+
+  IAMUserName:
+    Description: Name of the IAM user
+    Value: !Ref TrulyYouIAMUser
+    Export:
+      Name: !Sub '${AWS::StackName}-IAMUserName'
+
+  AccessKeyId:
+    Description: Access Key ID for the IAM user (COPY THIS - it won't be shown again)
+    Value: !Ref TrulyYouAccessKey
+
+  SecretAccessKey:
+    Description: Secret Access Key for the IAM user (COPY THIS - it won't be shown again)
+    Value: !GetAtt TrulyYouAccessKey.SecretAccessKey
+
+  Region:
+    Description: AWS Region where resources were created
+    Value: !Ref AWS::Region
+
+  SetupInstructions:
+    Description: Next steps
+    Value: Copy the Access Key ID and Secret Access Key above and paste them into the TrulyYou setup form
+
