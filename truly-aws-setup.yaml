@@ -212,4 +212,17 @@ Outputs:
   SetupInstructions:
     Description: Next steps
     Value: Copy the Access Key ID and Secret Access Key above and paste them into the TrulyYou setup form
+  
+  TrulyYouSetupJSON:
+    Description: 'COPY THIS JSON - Complete AWS configuration for TrulyYou setup (paste into "Import from JSON" on setup page)'
+    Value: !Sub |
+      {
+        "awsAccessKeyId": "${TrulyYouAccessKey}",
+        "awsSecretAccessKey": "${TrulyYouAccessKey.SecretAccessKey}",
+        "awsRegion": "${AWS::Region}",
+        "s3Bucket": "${TrulyYouBucket}",
+        "cognitoUserPoolId": "${TrulyYouUserPool}",
+        "cognitoUserPoolClientId": "${TrulyYouUserPoolClient}",
+        "cognitoIdentityPoolId": "${TrulyYouIdentityPool}"
+      }
 
