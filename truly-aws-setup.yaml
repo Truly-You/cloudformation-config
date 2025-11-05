@@ -2,19 +2,30 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'TrulyYou - AWS Resources Setup (S3, IAM User with Amplify, Rekognition, and Cognito permissions)'
 
 Parameters:
+  DeploymentName:
+    Type: String
+    Description: Custom name for this deployment (e.g., 'production', 'staging', 'dev', or your company name)
+    Default: production
+    AllowedPattern: '^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$'
+    ConstraintDescription: Must be lowercase, 2-32 characters, and contain only letters, numbers, and hyphens
+  
   BucketName:
     Type: String
-    Description: Name for the S3 bucket (must be globally unique)
-    Default: truly-you-bucket
-    AllowedPattern: '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
-    ConstraintDescription: Bucket name must be lowercase, 3-63 characters, and contain only letters, numbers, and hyphens
+    Description: Name for the S3 bucket (leave default to auto-generate with deployment name)
+    Default: ''
+
+Conditions:
+  UseDefaultBucketName: !Equals [!Ref BucketName, '']
 
 Resources:
   # S3 Bucket for storing user data, liveness images, etc.
   TrulyYouBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Ref BucketName
+      BucketName: !If 
+        - UseDefaultBucketName
+        - !Sub 'trulyyou-${DeploymentName}-${AWS::AccountId}'
+        - !Ref BucketName
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -49,7 +60,7 @@ Resources:
   TrulyYouIAMUser:
     Type: AWS::IAM::User
     Properties:
-      UserName: !Sub 'truly-you-user-${AWS::StackName}'
+      UserName: !Sub 'trulyyou-${DeploymentName}-user'
       Tags:
         - Key: Application
           Value: TrulyYou
@@ -62,11 +73,121 @@ Resources:
     Properties:
       UserName: !Ref TrulyYouIAMUser
 
+  # Cognito User Pool for user authentication
+  TrulyYouUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'TrulyYou-${DeploymentName}'
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      Tags:
+        - Key: Application
+          Value: TrulyYou
+        - Key: Environment
+          Value: !Ref DeploymentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Cognito User Pool Client
+  TrulyYouUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'TrulyYou-${DeploymentName}-Client'
+      UserPoolId: !Ref TrulyYouUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+  # Cognito Identity Pool for AWS resource access
+  TrulyYouIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Sub 'TrulyYou_${DeploymentName}'
+      AllowUnauthenticatedIdentities: true
+      CognitoIdentityProviders:
+        - ClientId: !Ref TrulyYouUserPoolClient
+          ProviderName: !GetAtt TrulyYouUserPool.ProviderName
+
+  # IAM Role for authenticated Cognito users
+  CognitoAuthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'TrulyYou-${DeploymentName}-CognitoAuthRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud: !Ref TrulyYouIdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Tags:
+        - Key: Application
+          Value: TrulyYou
+        - Key: Environment
+          Value: !Ref DeploymentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # IAM Role for unauthenticated Cognito users
+  CognitoUnauthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'TrulyYou-${DeploymentName}-CognitoUnauthRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud: !Ref TrulyYouIdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: unauthenticated
+      Tags:
+        - Key: Application
+          Value: TrulyYou
+        - Key: Environment
+          Value: !Ref DeploymentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Attach roles to Identity Pool
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref TrulyYouIdentityPool
+      Roles:
+        authenticated: !GetAtt CognitoAuthenticatedRole.Arn
+        unauthenticated: !GetAtt CognitoUnauthenticatedRole.Arn
+
   # IAM Policy for S3 full access to the bucket
   TrulyYouS3Policy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: TrulyYouS3Access
+      PolicyName: !Sub 'TrulyYou-${DeploymentName}-S3Access'
       Users:
         - !Ref TrulyYouIAMUser
       PolicyDocument:
@@ -84,7 +205,7 @@ Resources:
   TrulyYouRekognitionPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: TrulyYouRekognitionAccess
+      PolicyName: !Sub 'TrulyYou-${DeploymentName}-RekognitionAccess'
       Users:
         - !Ref TrulyYouIAMUser
       PolicyDocument:
@@ -109,7 +230,7 @@ Resources:
   TrulyYouAmplifyPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: TrulyYouAmplifyAccess
+      PolicyName: !Sub 'TrulyYou-${DeploymentName}-AmplifyAccess'
       Users:
         - !Ref TrulyYouIAMUser
       PolicyDocument:
@@ -125,7 +246,7 @@ Resources:
   TrulyYouCognitoPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: TrulyYouCognitoAccess
+      PolicyName: !Sub 'TrulyYou-${DeploymentName}-CognitoAccess'
       Users:
         - !Ref TrulyYouIAMUser
       PolicyDocument:
@@ -143,7 +264,7 @@ Resources:
   TrulyYouCloudFrontPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: TrulyYouCloudFrontAccess
+      PolicyName: !Sub 'TrulyYou-${DeploymentName}-CloudFrontAccess'
       Users:
         - !Ref TrulyYouIAMUser
       PolicyDocument:
@@ -159,7 +280,7 @@ Resources:
   TrulyYouLambdaPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: TrulyYouLambdaAccess
+      PolicyName: !Sub 'TrulyYou-${DeploymentName}-LambdaAccess'
       Users:
         - !Ref TrulyYouIAMUser
       PolicyDocument:
@@ -179,6 +300,10 @@ Resources:
             Resource: 'arn:aws:logs:*:*:*'
 
 Outputs:
+  DeploymentName:
+    Description: The deployment/environment name for this stack
+    Value: !Ref DeploymentName
+  
   BucketName:
     Description: Name of the S3 bucket
     Value: !Ref TrulyYouBucket
@@ -208,10 +333,28 @@ Outputs:
   Region:
     Description: AWS Region where resources were created
     Value: !Ref AWS::Region
+  
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref TrulyYouUserPool
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolId'
+  
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref TrulyYouUserPoolClient
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolClientId'
+  
+  IdentityPoolId:
+    Description: Cognito Identity Pool ID
+    Value: !Ref TrulyYouIdentityPool
+    Export:
+      Name: !Sub '${AWS::StackName}-IdentityPoolId'
 
   SetupInstructions:
     Description: Next steps
-    Value: Copy the Access Key ID and Secret Access Key above and paste them into the TrulyYou setup form
+    Value: !Sub 'TrulyYou (${DeploymentName}) - Copy the TrulyYouSetupJSON below and paste it into the setup form'
   
   TrulyYouSetupJSON:
     Description: 'COPY THIS JSON - Complete AWS configuration for TrulyYou setup (paste into "Import from JSON" on setup page)'
