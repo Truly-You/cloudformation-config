@@ -92,13 +92,10 @@ Resources:
           RequireLowercase: true
           RequireNumbers: true
           RequireSymbols: true
-      Tags:
-        - Key: Application
-          Value: TrulyYou
-        - Key: Environment
-          Value: !Ref DeploymentName
-        - Key: ManagedBy
-          Value: CloudFormation
+      UserPoolTags:
+        Application: TrulyYou
+        Environment: !Ref DeploymentName
+        ManagedBy: CloudFormation
 
   # Cognito User Pool Client
   TrulyYouUserPoolClient:
@@ -358,14 +355,5 @@ Outputs:
   
   TrulyYouSetupJSON:
     Description: 'COPY THIS JSON - Complete AWS configuration for TrulyYou setup (paste into "Import from JSON" on setup page)'
-    Value: !Sub |
-      {
-        "awsAccessKeyId": "${TrulyYouAccessKey}",
-        "awsSecretAccessKey": "${TrulyYouAccessKey.SecretAccessKey}",
-        "awsRegion": "${AWS::Region}",
-        "s3Bucket": "${TrulyYouBucket}",
-        "cognitoUserPoolId": "${TrulyYouUserPool}",
-        "cognitoUserPoolClientId": "${TrulyYouUserPoolClient}",
-        "cognitoIdentityPoolId": "${TrulyYouIdentityPool}"
-      }
+    Value: !Sub '{"awsAccessKeyId":"${TrulyYouAccessKey}","awsSecretAccessKey":"${TrulyYouAccessKey.SecretAccessKey}","awsRegion":"${AWS::Region}","s3Bucket":"${TrulyYouBucket}","cognitoUserPoolId":"${TrulyYouUserPool}","cognitoUserPoolClientId":"${TrulyYouUserPoolClient}","cognitoIdentityPoolId":"${TrulyYouIdentityPool}"}'
 
